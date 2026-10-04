@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<title>Attention Head Walkthrough</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F3F5F9; --panel:#FFFFFF; --panel2:#E9EDF4; --line:#D3D9E4; --line2:#B9C2D2;
+  --text:#14181F; --muted:#5B6578; --faint:#8A94A8;
+  --emb:#6C4BD9; --q:#1878C4; --k:#B7791F; --v:#D2472F; --pos:#1878C4; --neg:#D2472F;
+  --emb-bg:rgba(108,75,217,.14); --q-bg:rgba(24,120,196,.14); --k-bg:rgba(183,121,31,.16); --v-bg:rgba(210,71,47,.14);
+  --mask:#8A94A8; --focus:#1878C4;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10141C; --panel:#171C26; --panel2:#1F2531; --line:#2A3140; --line2:#3A4356;
+    --text:#E8EBF1; --muted:#9AA3B5; --faint:#6B7488;
+    --emb:#B39DF5; --q:#62B6F0; --k:#F0B94A; --v:#F26D5B; --pos:#62B6F0; --neg:#F26D5B;
+    --emb-bg:rgba(179,157,245,.16); --q-bg:rgba(98,182,240,.16); --k-bg:rgba(240,185,74,.18); --v-bg:rgba(242,109,91,.16);
+    --mask:#4A5366; --focus:#62B6F0;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10141C; --panel:#171C26; --panel2:#1F2531; --line:#2A3140; --line2:#3A4356;
+  --text:#E8EBF1; --muted:#9AA3B5; --faint:#6B7488;
+  --emb:#B39DF5; --q:#62B6F0; --k:#F0B94A; --v:#F26D5B; --pos:#62B6F0; --neg:#F26D5B;
+  --emb-bg:rgba(179,157,245,.16); --q-bg:rgba(98,182,240,.16); --k-bg:rgba(240,185,74,.18); --v-bg:rgba(242,109,91,.16);
+  --mask:#4A5366; --focus:#62B6F0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--sans);}
+button{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+@media (max-width:900px){.app{grid-template-columns:1fr}.rail{position:static!important;height:auto!important;border-right:0;border-bottom:1px solid var(--line)}}
+.rail{border-right:1px solid var(--line);background:var(--panel);position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column}
+.rail-head{padding:20px 18px 14px;border-bottom:1px solid var(--line)}
+.rail-head .eyebrow{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.rail-head h1{font:600 20px/1.2 var(--serif);margin:8px 0 4px;text-wrap:balance}
+.rail-head p{margin:0;color:var(--muted);font-size:13px}
+.rail-head a{color:var(--q);text-decoration:none}
+.rail-head a:hover{text-decoration:underline}
+.chapters{list-style:none;margin:0;padding:8px 0;flex:1}
+.chapters li button{display:grid;grid-template-columns:44px 1fr;gap:10px;width:100%;text-align:left;background:none;border:0;padding:9px 18px;cursor:pointer;border-left:3px solid transparent;color:var(--text)}
+.chapters li button:hover{background:var(--panel2)}
+.chapters li button[aria-current="true"]{border-left-color:var(--q);background:var(--panel2)}
+.chapters li button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.chapters .ts{font:12px/1.6 var(--mono);color:var(--faint);font-variant-numeric:tabular-nums}
+.chapters .ct{font-size:14px}
+.chapters .done .ct{color:var(--muted)}
+.chapters .prog{display:block;height:3px;background:var(--line);margin-top:6px;border-radius:2px;overflow:hidden}
+.chapters .prog i{display:block;height:100%;background:var(--q);width:0}
+.rail-foot{padding:14px 18px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.rail-foot kbd{font:11px var(--mono);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;background:var(--panel2)}
+
+.stage{padding:28px 36px 120px;max-width:1120px}
+@media (max-width:900px){.stage{padding:20px 16px 130px}}
+.ch-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.ch-head .ts{font:13px var(--mono);color:var(--faint)}
+.ch-head h2{font:600 30px/1.15 var(--serif);margin:0;text-wrap:balance}
+.stepbar{display:flex;gap:6px;margin:14px 0 18px;flex-wrap:wrap}
+.stepbar button{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:3px 11px;font-size:12px;cursor:pointer;color:var(--muted)}
+.stepbar button[aria-current="true"]{border-color:var(--q);color:var(--text);background:var(--q-bg)}
+.stepbar button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.explain{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 22px;max-width:72ch;margin-bottom:18px}
+.explain .stepno{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--q);margin-bottom:8px}
+.explain h3{font:600 20px/1.25 var(--serif);margin:0 0 8px;text-wrap:balance}
+.explain p{margin:0 0 8px}
+.explain p:last-child{margin:0}
+.explain .aside{color:var(--muted);font-size:13.5px;border-left:2px solid var(--line2);padding-left:10px;margin-top:10px}
+.viz{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;overflow-x:auto}
+.viz h4{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+.viz .note{color:var(--muted);font-size:13px;margin-top:12px}
+.row{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.col{display:flex;flex-direction:column;gap:14px}
+.nav{position:fixed;bottom:0;left:260px;right:0;background:var(--panel);border-top:1px solid var(--line);padding:10px 36px;display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;z-index:5}
+@media (max-width:900px){.nav{left:0;padding:10px 16px}}
+.nav .btn{border:1px solid var(--line2);background:var(--panel2);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:500}
+.nav .btn.primary{background:var(--q);color:#fff;border-color:var(--q)}
+.nav .btn:disabled{opacity:.4;cursor:default}
+.nav .btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.tally{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font:13px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.tally .lbl{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.tally b{color:var(--text);font-weight:500}
+.tally .dim{opacity:.45}
+
+/* tokens */
+.tokens{display:flex;gap:8px;flex-wrap:wrap}
+.tok{border:1px solid var(--line2);border-radius:6px;padding:6px 10px;background:var(--panel2);font:500 15px var(--serif);position:relative;cursor:default}
+.tok small{display:block;font:11px var(--mono);color:var(--faint);margin-top:1px}
+.tok.adj{border-color:var(--k)} .tok.noun{border-color:var(--q)}
+.tok.sel{outline:2px solid var(--emb);outline-offset:2px}
+.tok.click{cursor:pointer}
+.tok.click:hover{background:var(--line)}
+.tok.dimmed{opacity:.35}
+/* vectors & matrices */
+.vec{display:inline-flex;flex-direction:column;align-items:center;gap:4px}
+.vec .name{font:13px var(--mono);color:var(--text)}
+.vec .cells{display:grid;gap:2px;border:1px solid var(--line2);border-radius:5px;padding:3px;background:var(--panel2)}
+.cell{width:38px;height:22px;display:flex;align-items:center;justify-content:center;font:11.5px var(--mono);border-radius:3px;font-variant-numeric:tabular-nums;color:var(--text)}
+.cell.sm{width:32px;height:20px;font-size:10.5px}
+.cell.masked{color:var(--faint);background:repeating-linear-gradient(45deg,transparent 0 3px,var(--line) 3px 4px)}
+.vec.emb .cells{border-color:var(--emb)} .vec.q .cells{border-color:var(--q)} .vec.k .cells{border-color:var(--k)} .vec.v .cells{border-color:var(--v)}
+.vec .name.emb{color:var(--emb)} .vec .name.q{color:var(--q)} .vec .name.k{color:var(--k)} .vec .name.v{color:var(--v)}
+.mat{display:inline-grid;gap:2px;border:1px solid var(--line2);border-radius:5px;padding:3px;background:var(--panel2)}
+.mat.q{border-color:var(--q)} .mat.k{border-color:var(--k)} .mat.v{border-color:var(--v)}
+.mwrap{display:inline-flex;flex-direction:column;align-items:center;gap:4px}
+.mwrap .name{font:13px var(--mono)}
+.mwrap .name.q{color:var(--q)} .mwrap .name.k{color:var(--k)} .mwrap .name.v{color:var(--v)} .mwrap .name.emb{color:var(--emb)}
+.mwrap .shape{font:11px var(--mono);color:var(--faint)}
+.dimlabels{display:grid;gap:2px;padding:3px 6px 3px 0}
+.dimlabels span{height:22px;display:flex;align-items:center;font:11px var(--mono);color:var(--muted);justify-content:flex-end}
+.op{font:24px var(--serif);color:var(--muted);align-self:center;padding:0 4px}
+.arrowm{display:inline-flex;flex-direction:column;align-items:center;align-self:center;color:var(--muted);font:12px var(--mono)}
+.arrowm .a{font-size:26px;line-height:1}
+/* attention grid */
+.agrid{display:inline-grid;gap:2px}
+.agrid .hd{font:11px var(--mono);color:var(--muted);display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;writing-mode:vertical-rl;transform:rotate(180deg);height:64px}
+.agrid .rh{font:11px var(--mono);color:var(--muted);display:flex;align-items:center;justify-content:flex-end;padding-right:8px}
+.agrid .ac{width:44px;height:30px;display:flex;align-items:center;justify-content:center;font:11px var(--mono);border-radius:3px;font-variant-numeric:tabular-nums;position:relative;color:var(--text)}
+.agrid .ac.hl{outline:2px solid var(--text)}
+.agrid .sum{font:11px var(--mono);color:var(--muted);display:flex;align-items:center;justify-content:center;border-top:1px dashed var(--line2);margin-top:2px;height:24px}
+.agrid .sum.bad{color:var(--neg)}
+.axis-q{font:11px var(--mono);color:var(--q);letter-spacing:.1em;text-transform:uppercase}
+.axis-k{font:11px var(--mono);color:var(--k);letter-spacing:.1em;text-transform:uppercase}
+svg text{font-family:var(--mono);fill:var(--text)}
+.dot-svg .lbl{font-size:11px;fill:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:999px;padding:4px 12px;background:var(--panel2);cursor:pointer;font-size:13px}
+.chip[aria-pressed="true"]{border-color:var(--q);background:var(--q-bg)}
+.chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.toggle{display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.toggle input{accent-color:var(--q)}
+.formula{font:22px var(--serif);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.formula .part{padding:4px 8px;border-radius:6px;border:1px solid transparent;cursor:help}
+.formula .part:hover,.formula .part.on{border-color:var(--line2);background:var(--panel2)}
+.formula sup,.formula sub{font-size:.6em}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:16px}
+.calc label{display:flex;flex-direction:column;gap:4px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.calc input{font:14px var(--mono);padding:6px 8px;border:1px solid var(--line2);border-radius:6px;background:var(--panel2);color:var(--text);font-variant-numeric:tabular-nums}
+.ptable{border-collapse:collapse;font:13px var(--mono);font-variant-numeric:tabular-nums;width:100%;max-width:720px}
+.ptable td,.ptable th{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right}
+.ptable th{text-align:left;font-weight:500;color:var(--muted)}
+.ptable td:first-child,.ptable th:first-child{text-align:left}
+.ptable tr.total td{font-weight:500;border-top:2px solid var(--line2)}
+.ptable .strike{text-decoration:line-through;color:var(--faint)}
+.bar{height:14px;background:var(--panel2);border:1px solid var(--line2);border-radius:4px;overflow:hidden;position:relative}
+.bar i{display:block;height:100%;background:var(--q)}
+.bar.stacked i{position:absolute;top:0;height:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font:12px var(--mono);color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.range{width:100%;accent-color:var(--q)}
+.big{font:600 30px/1 var(--serif);font-variant-numeric:tabular-nums}
+.stack{display:flex;flex-direction:column;gap:3px}
+.block{border:1px solid var(--line2);border-radius:6px;padding:6px 10px;font:12px var(--mono);text-align:center;background:var(--panel2)}
+.block.attn{border-color:var(--q);background:var(--q-bg)} .block.mlp{border-color:var(--emb);background:var(--emb-bg)}
+.sent{font:17px/1.7 var(--serif)}
+.sent mark{background:var(--k-bg);color:inherit;padding:0 3px;border-radius:3px;border-bottom:2px solid var(--k)}
+.sent .pred{color:var(--q);border-bottom:2px dashed var(--q)}
+.links a{color:var(--q)}
+.links li{margin:4px 0}
+.diff{color:var(--pos)} .diff.neg{color:var(--neg)}
+.tiny{font:11px var(--mono);color:var(--faint)}
+@media (prefers-reduced-motion:no-preference){.cell,.agrid .ac,.tok{transition:background-color .35s,transform .35s}.mover{transition:cx .6s,cy .6s,x .6s,y .6s,x2 .6s,y2 .6s}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="rail">
+  <div class="rail-head">
+    <div class="eyebrow">Interactive simulation</div>
+    <h1>Attention Head Walkthrough</h1>
+    <p>Every step of <a href="https://www.youtube.com/watch?v=eMlx5fFNoYc" target="_blank" rel="noopener">3Blue1Brown, Deep Learning Chapter 6</a>, computed live on a toy head.</p>
+  </div>
+  <ol class="chapters" id="chapters"></ol>
+  <div class="rail-foot">Navigate with <kbd>←</kbd> <kbd>→</kbd>. Toy dimensions: embedding 8, key‑query space 3. GPT‑3 numbers appear where the video quotes them.</div>
+</aside>
+<main class="stage" id="stage"></main>
+</div>
+<div class="nav">
+  <button class="btn" id="prev">← Previous step</button>
+  <div class="tally" id="tally"></div>
+  <button class="btn primary" id="next">Next step →</button>
+</div>
+
+<script>
+/* ---------------------------- toy model ---------------------------- */
+const TOK=["a","fluffy","blue","creature","roamed","the","verdant","forest"];
+const POS_OF={a:"det",fluffy:"adj",blue:"adj",creature:"noun",roamed:"verb",the:"det",verdant:"adj",forest:"noun"};
+const DIMS=["DET","ADJ","NOUN","VERB","cute","colour","green","pos"];
+const N=TOK.length, D=8, DK=3;
+// hand-designed context-free embeddings: word type, three "topic" features, position
+const E=[
+ [1,0,0,0, 0.0,0.0,0.0, 0/7],
+ [0,1,0,0, 0.9,0.1,0.0, 1/7],
+ [0,1,0,0, 0.3,0.9,0.1, 2/7],
+ [0,0,1,0, 0.8,0.2,0.1, 3/7],
+ [0,0,0,1, 0.2,0.0,0.4, 4/7],
+ [1,0,0,0, 0.0,0.0,0.0, 5/7],
+ [0,1,0,0, 0.0,0.3,0.9, 6/7],
+ [0,0,1,0, 0.1,0.1,0.9, 7/7]];
+// Head A: "nouns look for adjectives in front of them, on the same topic"
+const HEADS=[
+ {name:"Head A · adjectives → nouns",short:"A",
+  Wq:[[0,0,2,0, 0,0,0,0],[0,0,0,0, 2.5,0,0,0],[0,0,0,0, 0,0,2.5,0]],
+  Wk:[[-2,2,0,-1, 0,0,0,0],[0,0,0,0, 2.5,0,0,0],[0,0,0,0, 0,0,2.5,0]],
+  Vd:[[0,0,0,0,1,0,0,0],[0,0,0,0,0,1,0,0],[0,0,0,0,0,0,1,0]],
+  Vu:[[0,0,0],[0,0,0],[0,0,0],[0,0,0],[1,0,0],[0,1,0],[0,0,1],[0,0,0]]},
+ {name:"Head B · verbs → their subject noun",short:"B",
+  Wq:[[0,0,0,2.5, 0,0,0,0],[0,0,0,0, 0,0,0,1],[0,0,0,0, 0,0,0,0]],
+  Wk:[[-1,-1,2,0, 0,0,0,0],[0,0,0,0, 0,0,0,1],[0,0,0,0, 0,0,0,0]],
+  Vd:[[0,0,1,0,0,0,0,0],[0,0,0,0,1,0,0,0],[0,0,0,0,0,0,1,0]],
+  Vu:[[0,0,0],[0,0,0],[0.6,0,0],[0,0,0],[0,0.8,0],[0,0,0],[0,0,0.8],[0,0,0]]},
+ {name:"Head C · nouns → the verb they act in",short:"C",
+  Wq:[[0,0,2.5,0, 0,0,0,0],[0,0,0,0, 0,0,0,1.5],[0,0,0,0, 0,0,0,0]],
+  Wk:[[-1,-1,0,2.5, 0,0,0,0],[0,0,0,0, 0,0,0,1.5],[0,0,0,0, 0,0,0,0]],
+  Vd:[[0,0,0,1,0,0,0,0],[0,0,0,0,0,0,1,0],[0,0,0,0,0,0,0,0]],
+  Vu:[[0,0,0],[0,0,0],[0,0,0],[0.7,0,0],[0,0,0],[0,0,0],[0,0.5,0],[0,0,0]]},
+];
+const matvec=(W,x)=>W.map(r=>r.reduce((s,w,i)=>s+w*x[i],0));
+const matmul=(A,B)=>A.map(r=>B[0].map((_,j)=>r.reduce((s,a,i)=>s+a*B[i][j],0)));
+const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+const T=M=>M[0].map((_,j)=>M.map(r=>r[j]));
+const add=(a,b)=>a.map((x,i)=>x+b[i]);
+const scale=(a,s)=>a.map(x=>x*s);
+function softmaxCols(S){ // S[k][q], softmax down each column
+  const A=S.map(r=>r.slice());
+  for(let q=0;q<S[0].length;q++){
+    let m=-Infinity; for(let k=0;k<S.length;k++) m=Math.max(m,S[k][q]);
+    let z=0; const ex=[]; for(let k=0;k<S.length;k++){ex[k]=S[k][q]===-Infinity?0:Math.exp(S[k][q]-m); z+=ex[k];}
+    for(let k=0;k<S.length;k++) A[k][q]=z?ex[k]/z:0;
+  }
+  return A;
+}
+function runHead(h,opts={}){
+  const {mask=true,scaled=true,naiveZero=false}=opts;
+  const Q=E.map(e=>matvec(h.Wq,e)), K=E.map(e=>matvec(h.Wk,e));
+  const S=K.map((k,ki)=>Q.map(q=>dot(k,q)/(scaled?Math.sqrt(DK):1)));   // S[key][query]
+  const Sm=S.map((r,ki)=>r.map((s,qi)=>(mask&&ki>qi)?-Infinity:s));
+  let A=softmaxCols(mask?Sm:S);
+  if(naiveZero){ const A0=softmaxCols(S); A=A0.map((r,ki)=>r.map((a,qi)=>ki>qi?0:a)); }
+  const Wv=matmul(h.Vu,h.Vd);                       // full 8×8 value map (rank 3)
+  const Vsmall=E.map(e=>matvec(h.Vd,e));            // value-down
+  const V=E.map(e=>matvec(Wv,e));                   // full value vectors
+  const dE=TOK.map((_,qi)=>{let acc=new Array(D).fill(0); for(let ki=0;ki<N;ki++) acc=add(acc,scale(V[ki],A[ki][qi])); return acc;});
+  const E2=E.map((e,i)=>add(e,dE[i]));
+  return {Q,K,S,Sm,A,Wv,V,Vsmall,dE,E2};
+}
+const R=HEADS.map(h=>runHead(h));
+const RA=R[0];
+
+/* ---------------------------- render helpers ---------------------------- */
+const f2=x=>x===-Infinity?"−∞":(Math.abs(x)<0.005?"0":(x<0?"−":"")+Math.abs(x).toFixed(2));
+const fInt=x=>Math.round(x).toLocaleString("en-US");
+const fShort=x=>x>=1e9?(x/1e9).toFixed(x>=1e10?0:1)+" B":x>=1e6?(x/1e6).toFixed(x>=1e8?0:1)+" M":x>=1e3?(x/1e3).toFixed(0)+" K":String(Math.round(x));
+function cellBg(v,max=2){ if(v===-Infinity) return ""; const a=Math.min(1,Math.abs(v)/max)*.75; return v>=0?`background:rgba(24,120,196,${a})`:`background:rgba(210,71,47,${a})`; }
+function cellBgPos(v){ const a=Math.min(1,v)*.85; return `background:rgba(24,120,196,${a})`; }
+function vec(v,{name="",cls="",max=2,small=false,labels=null}={}){
+  return `<div class="vec ${cls}"><div class="name ${cls}">${name}</div><div class="cells">${v.map(x=>`<div class="cell ${small?'sm':''}" style="${cellBg(x,max)}">${f2(x)}</div>`).join("")}</div></div>`;
+}
+function dimLabels(labels){return `<div class="dimlabels" style="padding-top:23px">${labels.map(l=>`<span>${l}</span>`).join("")}</div>`;}
+function mat(M,{name="",cls="",shape=true,max=2,small=false}={}){
+  const cols=M[0].length;
+  return `<div class="mwrap"><div class="name ${cls}">${name}</div><div class="mat ${cls}" style="grid-template-columns:repeat(${cols},auto)">${M.flat().map(x=>`<div class="cell ${small?'sm':''}" style="${cellBg(x,max)}">${f2(x)}</div>`).join("")}</div>${shape?`<div class="shape">${M.length} × ${cols}</div>`:""}</div>`;
+}
+function tokens({sel=-1,tag=true,click=false,dim=null}={}){
+  return `<div class="tokens">${TOK.map((t,i)=>`<div class="tok ${tag?POS_OF[t]:''} ${i===sel?'sel':''} ${click?'click':''} ${dim&&!dim.includes(i)?'dimmed':''}" data-i="${i}">${t}<small>E<sub>${i+1}</sub>${tag?" · "+POS_OF[t]:""}</small></div>`).join("")}</div>`;
+}
+// attention grid: rows keys, cols queries. mode: 'dots' | 'heat' | 'raw'
+function agrid(S,{mode="heat",showSums=false,hl=null,rowTok=TOK,colTok=TOK,maskedSet=null,max=2}={}){
+  const cols=colTok.length;
+  let h=`<div class="agrid" style="grid-template-columns:78px repeat(${cols},44px)">`;
+  h+=`<div></div>`+colTok.map(t=>`<div class="hd">${t}</div>`).join("");
+  S.forEach((r,ki)=>{
+    h+=`<div class="rh">${rowTok[ki]}</div>`;
+    r.forEach((s,qi)=>{
+      const masked=maskedSet&&maskedSet(ki,qi);
+      const isHl=hl&&hl[0]===ki&&hl[1]===qi;
+      let style="",txt="";
+      if(mode==="heat"){style=cellBgPos(s);txt=s<0.005?"·":s.toFixed(2);}
+      else if(mode==="raw"){style=cellBg(s,max);txt=f2(s);}
+      else {const rad=Math.min(13,Math.sqrt(Math.abs(s))*7);style="";txt=`<svg width="30" height="30" viewBox="-15 -15 30 30"><circle r="${s===-Infinity?0:rad}" fill="${s>=0?'var(--pos)':'var(--neg)'}" opacity=".85"></circle></svg>`;}
+      if(s===-Infinity){txt="−∞";style="";}
+      h+=`<div class="ac ${masked?'masked':''} ${isHl?'hl':''}" style="${style}" data-k="${ki}" data-q="${qi}" title="key ${rowTok[ki]} · query ${colTok[qi]}">${txt}</div>`;
+    });
+  });
+  if(showSums){h+=`<div class="sum" style="border:0"></div>`; for(let q=0;q<cols;q++){const sum=S.reduce((a,r)=>a+(r[q]===-Infinity?0:r[q]),0); h+=`<div class="sum ${Math.abs(sum-1)>0.01?'bad':''}">Σ ${sum.toFixed(2)}</div>`;}}
+  h+=`</div>`;
+  return h;
+}
+function axes(){return `<div style="display:flex;gap:16px;margin-bottom:8px"><span class="axis-q">columns = queries</span><span class="axis-k">rows = keys</span></div>`;}
+
+/* small 2-D embedding plot */
+function plot2d(points,{w=420,h=300,arrows=[],axesLbl=["",""],extra=""}={}){
+  const pad=34, sx=x=>pad+x*(w-2*pad), sy=y=>h-pad-y*(h-2*pad);
+  let s=`<svg class="dot-svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="max-width:100%">`;
+  s+=`<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="var(--line2)"/><line x1="${pad}" y1="${h-pad}" x2="${pad}" y2="${pad}" stroke="var(--line2)"/>`;
+  s+=`<text class="lbl" x="${w-pad}" y="${h-pad+18}" text-anchor="end">${axesLbl[0]}</text><text class="lbl" x="${pad-6}" y="${pad-8}" text-anchor="start">${axesLbl[1]}</text>`;
+  arrows.forEach(a=>{s+=`<line class="mover" x1="${sx(a.from[0])}" y1="${sy(a.from[1])}" x2="${sx(a.to[0])}" y2="${sy(a.to[1])}" stroke="${a.color||'var(--emb)'}" stroke-width="2" marker-end="url(#ah)" stroke-dasharray="${a.dash?'4 3':'0'}"/>`;});
+  points.forEach(p=>{s+=`<circle class="mover" cx="${sx(p.x)}" cy="${sy(p.y)}" r="${p.r||5}" fill="${p.color||'var(--muted)'}"/><text class="mover" x="${sx(p.x)+8}" y="${sy(p.y)-6}" font-size="12" fill="${p.color||'var(--muted)'}">${p.label}</text>`;});
+  s+=`<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="context-stroke"/></marker></defs>${extra}</svg>`;
+  return s;
+}
+
+/* ---------------------------- GPT-3 tally ---------------------------- */
+const GPT={d:12288,dk:128,heads:96,layers:96,total:175e9};
+const gptCount=g=>{const per=g.d*g.dk; return {per,vfull:g.d*g.d,head:4*per,block:4*per*g.heads,all:4*per*g.heads*g.layers};};
+
+/* ---------------------------- chapters ---------------------------- */
+const CH=[
+{t:"0:00",title:"Recap on embeddings",steps:[
+ {h:"The model’s job: predict the next token",
+  p:`<p>The transformer we are studying takes in a piece of text and predicts what comes next. The input is first chopped into <b>tokens</b>, which are often words or pieces of words. To keep the examples easy to think about, the video pretends tokens are always whole words, and so does this simulation.</p><p>This is the phrase the video uses for the detailed computation, so we will keep it in view from the start.</p>`,
+  viz:()=>`<h4>Input text → tokens</h4><p class="sent">a fluffy blue creature roamed the verdant forest <span class="pred">?</span></p>${tokens({tag:false})}<p class="note">Eight tokens. The model’s output is a probability distribution over what should follow <i>forest</i>.</p>`},
+ {h:"Each token becomes an embedding vector",
+  p:`<p>The first step of a transformer associates every token with a high‑dimensional vector, its <b>embedding</b>. GPT‑3 uses 12,288 dimensions. This toy head uses 8, and, unlike a real model, the entries are labelled so you can read what each one means. In a trained model nobody labels the axes; the meaning of each direction is learned.</p><p class="aside">We write the embedding of the i‑th token as E<sub>i</sub>. These vectors are a pure lookup: the same word always starts with the same vector.</p>`,
+  viz:()=>`<h4>Embeddings E<sub>1</sub> … E<sub>8</sub> (toy, 8 dimensions)</h4><div class="row">${dimLabels(DIMS)}${TOK.map((t,i)=>vec(E[i],{name:`E<sub>${i+1}</sub> ${t}`,cls:"emb",max:1})).join("")}</div><p class="note">Rows 1–4 say what kind of word it is, rows 5–7 carry three toy “topic” features, and the last row encodes position (more on that in the attention chapter).</p>`},
+ {h:"Directions in embedding space carry meaning",
+  p:`<p>The most important idea from the last chapter: <b>directions</b> in this space can correspond to semantic meaning. The classic example is a gender direction. Adding one fixed step takes you from a masculine noun to its feminine counterpart: man → woman, king → queen, uncle → aunt.</p><p>Press the button to add the same “gender step” to each masculine word and watch it land on the feminine one.</p>`,
+  viz:(s)=>{
+    const base=[["man",.18,.25],["king",.35,.62],["uncle",.62,.30]]; const step=[.22,.22];
+    const on=s.gender;
+    const pts=base.map(([l,x,y])=>({x,y,label:l,color:"var(--q)"})).concat(base.map(([l,x,y])=>({x:x+(on?step[0]:0),y:y+(on?step[1]:0),label:on?({man:"woman",king:"queen",uncle:"aunt"})[l]:"",color:"var(--v)",r:on?5:0})));
+    const arrows=on?base.map(([l,x,y])=>({from:[x,y],to:[x+step[0],y+step[1]]})):[];
+    return `<h4>A single direction ≈ gender</h4><div class="chips"><button class="chip" aria-pressed="${!!on}" data-act="gender">Add the gender step to every word</button></div>${plot2d(pts,{arrows,axesLbl:["(a 2‑D shadow of 12,288 dims)",""]})}<p class="note">Same arrow, three different starting points. Many other directions encode many other aspects of meaning.</p>`;}},
+ {h:"The aim of a transformer",
+  p:`<p>The goal is to <b>progressively adjust</b> these embeddings so they no longer encode a single isolated word but bake in much richer contextual meaning. Attention is the mechanism that lets context flow into an embedding. The video warns that many people find it confusing, so it takes time to sink in; that is why this walkthrough does one small step at a time.</p>`,
+  viz:()=>`<h4>What the rest of the video builds</h4><div class="row" style="align-items:center"><div class="col"><div class="tiny">lookup, no context</div>${vec(E[3],{name:"E<sub>4</sub> creature",cls:"emb",max:1})}</div><div class="arrowm"><span class="a">→</span>attention block</div><div class="col"><div class="tiny">context baked in</div>${vec(RA.E2[3],{name:"E′<sub>4</sub> fluffy blue creature",cls:"emb",max:1.6})}</div></div><p class="note">The right‑hand vector is what this toy head actually produces by the end of the Values chapter. Note the extra weight on the <i>cute</i> and <i>colour</i> features, absorbed from <i>fluffy</i> and <i>blue</i>.</p>`},
+]},
+{t:"1:39",title:"Motivating examples",steps:[
+ {h:"One word, three meanings, one starting vector",
+  p:`<p>Consider <i>American shrew <b>mole</b></i>, <i>one <b>mole</b> of carbon dioxide</i>, and <i>take a biopsy of the <b>mole</b></i>. You know the word means something different in each. But after the first step of the transformer, the vector attached to <i>mole</i> is <b>identical</b> in all three, because the initial embedding is a lookup table with no reference to context.</p>`,
+  viz:()=>{const m=[0,0,1,0,0.3,0.3,0.3,0.5];return `<h4>Initial embedding of “mole”, three contexts</h4><div class="row">${["American shrew <mark>mole</mark>","one <mark>mole</mark> of carbon dioxide","take a biopsy of the <mark>mole</mark>"].map(s=>`<div class="col" style="align-items:center"><div class="sent" style="font-size:15px">${s}</div>${vec(m,{name:"E<sub>mole</sub>",cls:"emb",max:1})}</div>`).join("")}</div><p class="note">Three identical vectors. Only the next step lets the surrounding embeddings pass information into this one.</p>`;}},
+ {h:"Attention moves the vector toward the right meaning",
+  p:`<p>Picture several distinct directions in embedding space encoding the distinct meanings of <i>mole</i>. A well‑trained attention block calculates <b>what to add</b> to the generic embedding to move it toward one of these specific directions, <b>as a function of the context</b>.</p><p>Pick a context to see the update ΔE applied to the generic point.</p>`,
+  viz:(s)=>{
+    const dirs={animal:[.30,.32],unit:[-.36,.18],skin:[.04,-.36]}; const g=[.5,.5]; const c=s.mole||null;
+    const pts=[{x:g[0],y:g[1],label:"mole (generic)",color:"var(--emb)"},{x:.85,y:.87,label:"shrew, burrow",color:"var(--muted)",r:3},{x:.1,y:.72,label:"6.022×10²³, gram",color:"var(--muted)",r:3},{x:.56,y:.1,label:"skin, biopsy",color:"var(--muted)",r:3}];
+    const arrows=c?[{from:g,to:[g[0]+dirs[c][0],g[1]+dirs[c][1]],color:"var(--v)"}]:[];
+    if(c) pts.push({x:g[0]+dirs[c][0],y:g[1]+dirs[c][1],label:"mole + ΔE",color:"var(--v)"});
+    return `<h4>Context‑dependent update</h4><div class="chips">${[["animal","American shrew mole"],["unit","one mole of CO₂"],["skin","biopsy of the mole"]].map(([k,l])=>`<button class="chip" aria-pressed="${c===k}" data-act="mole" data-val="${k}">${l}</button>`).join("")}</div>${plot2d(pts,{arrows})}`;}},
+ {h:"Refining “tower” with more and more context",
+  p:`<p>The embedding of <i>tower</i> is presumably a generic direction shared with other large, tall nouns. If it is preceded by <i>Eiffel</i>, we would want the vector updated to point more specifically at the Eiffel Tower, correlating with <i>Paris</i>, <i>France</i>, and things made of steel. If it is also preceded by <i>miniature</i>, the vector should move again so it no longer correlates with large, tall things.</p>`,
+  viz:(s)=>{
+    const eif=!!s.eiffel, mini=!!s.mini;
+    let p=[.25,.78]; const trail=[{from:p.slice(),to:null}];
+    if(eif){const n=[.72,.80]; trail[0].to=n; p=n;}
+    if(mini){const n=[p[0]+.06,.28]; trail.push({from:p.slice(),to:n}); p=n;}
+    const arrows=trail.filter(a=>a.to).map(a=>({from:a.from,to:a.to,color:"var(--v)"}));
+    const pts=[{x:p[0],y:p[1],label:(mini?"miniature ":"")+(eif?"Eiffel ":"")+"tower",color:"var(--emb)",r:6},
+      {x:.15,y:.9,label:"skyscraper",color:"var(--muted)",r:3},{x:.3,y:.65,label:"giant",color:"var(--muted)",r:3},
+      {x:.86,y:.88,label:"Paris",color:"var(--muted)",r:3},{x:.8,y:.7,label:"France",color:"var(--muted)",r:3},{x:.9,y:.6,label:"steel",color:"var(--muted)",r:3},
+      {x:.7,y:.15,label:"souvenir",color:"var(--muted)",r:3},{x:.85,y:.3,label:"tiny",color:"var(--muted)",r:3}];
+    return `<h4>Preceding words update the vector</h4><div class="chips"><button class="chip" aria-pressed="${mini}" data-act="mini">miniature</button><button class="chip" aria-pressed="${eif}" data-act="eiffel">Eiffel</button><span class="chip" style="cursor:default;border-color:var(--emb)">tower</span></div>${plot2d(pts,{arrows,axesLbl:["← generic · Paris / France / steel →","↑ large, tall"]})}<p class="note">Two updates, one per context word. In a real model both happen inside the same forward pass.</p>`;}},
+ {h:"Information can travel far, and everything funnels into the last vector",
+  p:`<p>More than refining single words, attention lets the model move information from one embedding to another, potentially far away and much richer than a single word. Recall from the last chapter that the next‑token prediction is <b>entirely a function of the last vector</b> in the sequence.</p><p>Imagine feeding in most of a mystery novel ending with <i>“therefore the murderer was”</i>. The final vector began life embedding only the word <i>was</i>. By the end it must encode everything in the context window relevant to naming the culprit.</p>`,
+  viz:()=>{
+    const words=["…","the","butler","…","candlestick","…","therefore","the","murderer","was"];
+    return `<h4>Only the last vector feeds the prediction</h4><svg viewBox="0 0 760 190" width="760" style="max-width:100%">${words.map((w,i)=>{const x=20+i*74;return `<rect x="${x}" y="100" width="62" height="30" rx="5" fill="var(--panel2)" stroke="${i===words.length-1?'var(--emb)':'var(--line2)'}" stroke-width="${i===words.length-1?2:1}"/><text x="${x+31}" y="120" text-anchor="middle" font-size="12">${w}</text>`}).join("")}
+    ${[2,4,6].map(i=>`<path d="M ${20+i*74+31} 100 Q ${(20+i*74+31+20+9*74+31)/2} ${20+(i*8)} ${20+9*74+31} 100" fill="none" stroke="var(--k)" stroke-width="1.6" marker-end="url(#ah2)"/>`).join("")}
+    <line x1="${20+9*74+31}" y1="130" x2="${20+9*74+31}" y2="160" stroke="var(--q)" stroke-width="2" marker-end="url(#ah2)"/><text x="${20+9*74+31}" y="180" text-anchor="middle" font-size="12" fill="var(--q)">next‑token prediction</text>
+    <defs><marker id="ah2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="context-stroke"/></marker></defs></svg><p class="note">Gold arcs: information carried by attention blocks from far‑away tokens into the final position.</p>`;}},
+]},
+{t:"4:29",title:"The attention pattern",steps:[
+ {h:"A simpler example: adjectives update nouns",
+  p:`<p>To step through the computation we use <i>a fluffy blue creature roamed the verdant forest</i>, and for the moment we care about exactly one kind of update: adjectives adjusting the meaning of their nouns. What follows is a <b>single head</b> of attention; later we will see an attention block run many heads in parallel.</p><p>The video corrects itself on one point: the initial embeddings encode not only the word but also its <b>position</b>. Exactly how positions are encoded is a longer story; all that matters here is that the entries of E<sub>i</sub> are enough to tell you both what the word is and where it sits.</p><p class="aside">The video is explicit that this adjective‑noun story is made up to keep things concrete. Real heads learn whatever minimises the training cost, and that is much harder to read off.</p>`,
+  viz:()=>`<h4>The target behaviour of this head</h4>${tokens()}<svg viewBox="0 0 700 70" width="700" style="max-width:100%;margin-top:6px">${[[1,3],[2,3],[6,7]].map(([a,b])=>`<path d="M ${45+a*88} 60 Q ${45+(a+b)/2*88} ${10-Math.abs(b-a)*4} ${45+b*88} 60" fill="none" stroke="var(--k)" stroke-width="2" marker-end="url(#ah3)"/>`).join("")}<defs><marker id="ah3" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--k)"/></marker></defs></svg><div class="row" style="margin-top:8px">${dimLabels(DIMS)}${vec(E[1],{name:"E<sub>2</sub> fluffy",cls:"emb",max:1})}${vec(E[3],{name:"E<sub>4</sub> creature",cls:"emb",max:1})}</div><p class="note">Bottom row, <i>pos</i>: the same word at a different place in the sentence would have a different vector.</p>`},
+ {h:"Playing the deep‑learning game: matrix‑vector products",
+  p:`<p>The goal is a series of computations that produces a new, refined set of embeddings, where the nouns have ingested the meaning of their adjectives. Playing the deep‑learning game, we want most of these computations to look like <b>matrix‑vector products</b>, where the matrices are full of tunable weights learned from data.</p><p>Whenever the video puts a matrix next to an arrow, it means: multiply the matrix by the vector at the arrow’s start to get the vector at the arrow’s end.</p>`,
+  viz:()=>`<h4>The notation used from here on</h4><div class="row" style="align-items:center">${vec(E[3],{name:"E<sub>4</sub>",cls:"emb",max:1})}<div class="arrowm"><span class="a">→</span>W (tunable weights)</div>${vec(matvec(HEADS[0].Wq,E[3]),{name:"W · E<sub>4</sub>",cls:"q"})}</div><p class="note">Three matrices of weights will appear in this head: W<sub>Q</sub>, W<sub>K</sub>, W<sub>V</sub>. All of them are learned.</p>`},
+ {h:"The query: a noun asks a question",
+  p:`<p>Imagine each noun, like <i>creature</i>, asking: “are there any adjectives sitting in front of me?” That question is encoded as another vector, the <b>query</b> for this word. The query lives in a much smaller space than the embedding (128 dimensions in GPT‑3 versus 12,288; here 3 versus 8).</p><p>Computing it is a matrix multiplication: <b>q = W<sub>Q</sub> · E</b>. Click a token to see its query being computed.</p>`,
+  viz:(s)=>{const i=s.sel??3;return `<h4>q<sub>${i+1}</sub> = W<sub>Q</sub> · E<sub>${i+1}</sub></h4>${tokens({sel:i,click:true})}<div class="row" style="align-items:center;margin-top:14px">${mat(HEADS[0].Wq,{name:"W<sub>Q</sub>",cls:"q"})}<span class="op">·</span>${vec(E[i],{name:`E<sub>${i+1}</sub> ${TOK[i]}`,cls:"emb",max:1})}<span class="op">=</span>${vec(RA.Q[i],{name:`q<sub>${i+1}</sub>`,cls:"q"})}</div><p class="note">In this toy, the first row of W<sub>Q</sub> fires for nouns (“I am looking for adjectives”), and rows two and three copy the noun’s topic so it prefers adjectives on the same topic. What a real W<sub>Q</sub> does to other words is anyone’s guess; the video says it may be pursuing some other goal with them at the same time.</p>`;}},
+ {h:"One query per token",
+  p:`<p>You multiply W<sub>Q</sub> by <b>every</b> embedding in the context, producing one query vector for each token. The entries of W<sub>Q</sub> are parameters of the model, so its real behaviour is learned. For our imagined example, we suppose it maps the nouns to a direction in query space that means “looking for adjectives in preceding positions”.</p>`,
+  viz:()=>`<h4>Queries for all eight tokens</h4><div class="row">${TOK.map((t,i)=>vec(RA.Q[i],{name:`q<sub>${i+1}</sub> ${t}`,cls:"q"})).join("")}</div><p class="note">Notice <i>creature</i> and <i>forest</i> both have a strong first entry: they are the ones asking.</p>`},
+ {h:"The key: a potential answer to a query",
+  p:`<p>A second matrix, the <b>key matrix</b> W<sub>K</sub>, is also multiplied by every embedding, giving a sequence of <b>keys</b>. Conceptually, keys are potential answers to queries. W<sub>K</sub> is also full of tunable parameters and maps into the same small key‑query space.</p><p>A key <b>matches</b> a query when the two closely align. In our example we imagine W<sub>K</sub> mapping <i>fluffy</i> and <i>blue</i> to keys that align with the query produced by <i>creature</i>.</p>`,
+  viz:(s)=>{const i=s.sel??1;return `<h4>k<sub>${i+1}</sub> = W<sub>K</sub> · E<sub>${i+1}</sub>, and all keys</h4>${tokens({sel:i,click:true})}<div class="row" style="align-items:center;margin-top:14px">${mat(HEADS[0].Wk,{name:"W<sub>K</sub>",cls:"k"})}<span class="op">·</span>${vec(E[i],{name:`E<sub>${i+1}</sub> ${TOK[i]}`,cls:"emb",max:1})}<span class="op">=</span>${vec(RA.K[i],{name:`k<sub>${i+1}</sub>`,cls:"k"})}</div><div class="row" style="margin-top:18px">${TOK.map((t,j)=>vec(RA.K[j],{name:`k<sub>${j+1}</sub> ${t}`,cls:"k"})).join("")}</div><p class="note">Adjectives get a positive first entry (“I am an adjective”); the determiners <i>a</i>/<i>the</i> get a negative one, so they will actively repel the nouns’ queries.</p>`;}},
+ {h:"Dot products: how well does each key match each query?",
+  p:`<p>To measure the match, compute the <b>dot product of every key‑query pair</b>. The video draws this as a grid of dots, bigger dots for larger dot products. Queries run along the top, keys down the side.</p><p>If the keys of <i>fluffy</i> and <i>blue</i> really align with the query of <i>creature</i>, those two spots are large positive numbers. In the lingo, the embeddings of <i>fluffy</i> and <i>blue</i> <b>attend to</b> <i>creature</i>. The key of an unrelated word like <i>the</i> against the query of <i>creature</i> comes out small or negative.</p><p>Hover a cell to see the exact multiplication.</p>`,
+  viz:(s)=>{const raw=runHead(HEADS[0],{mask:false,scaled:false}).S; const hl=s.hl||[1,3];
+    const k=RA.K[hl[0]],q=RA.Q[hl[1]];
+    return `<h4>k<sub>i</sub> · q<sub>j</sub> for every pair (unscaled, unmasked)</h4>${axes()}<div class="row"><div data-hover="dots">${agrid(raw,{mode:"dots",hl})}</div><div class="col" style="min-width:260px"><div class="tiny">selected cell</div><div style="font:14px var(--mono)">k<sub>${hl[0]+1}</sub> (${TOK[hl[0]]}) · q<sub>${hl[1]+1}</sub> (${TOK[hl[1]]})</div><div class="row" style="align-items:center">${vec(k,{name:"k",cls:"k"})}<span class="op">·</span>${vec(q,{name:"q",cls:"q"})}</div><div style="font:13px var(--mono)">= ${k.map((x,i)=>`${f2(x)}·${f2(q[i])}`).join(" + ")}<br>= <b>${f2(dot(k,q))}</b></div></div></div><p class="note">Scores can be any real number from −∞ to ∞. That is a problem for the next step.</p>`;}},
+ {h:"Softmax each column → the attention pattern",
+  p:`<p>We are about to use these scores as weights in a weighted sum down each column. So instead of values from −∞ to ∞ we want every column to hold numbers between 0 and 1 that <b>add up to 1</b>, like a probability distribution. From the last chapter you know the tool: apply a <b>softmax</b> to each column.</p><p>Each column now gives weights for how relevant the word on the left is to the word at the top. This grid is called the <b>attention pattern</b>.</p>`,
+  viz:(s)=>{const r=runHead(HEADS[0],{mask:false,scaled:true}); const on=s.soft??true;
+    return `<h4>${on?"After softmax (column by column)":"Before softmax (raw scores ÷ √3)"}</h4><div class="chips"><button class="chip" aria-pressed="${on}" data-act="soft">Apply softmax to every column</button></div>${axes()}${agrid(on?r.A:r.S,{mode:on?"heat":"raw",showSums:on})}<p class="note">Read the <i>creature</i> column: most of the weight lands on <i>fluffy</i> and <i>blue</i>. (This view has no masking yet; that comes next chapter and will change the later columns.)</p>`;}},
+ {h:"The compact formula from the paper",
+  p:`<p>The original transformer paper writes all of this in one line. Q and K are the full arrays of query and key vectors. The numerator is the compact way to write the grid of all key‑query dot products. One technical detail: for numerical stability the scores are divided by the <b>square root of the key‑query dimension</b>. The softmax is understood to apply column by column. The V term is what the Values chapter is about.</p><p>Hover the pieces of the formula.</p>`,
+  viz:(s)=>{const sc=s.scaled??true; const r=runHead(HEADS[0],{mask:false,scaled:sc});
+    return `<h4>Attention(Q, K, V) as written in “Attention is All You Need”</h4><div class="formula">softmax<span class="part" title="Applied down each column of the grid">(</span><span class="part" style="color:var(--k)" title="K: all key vectors; Kᵀ Q is the whole grid of dot products">K<sup>ᵀ</sup></span><span class="part" style="color:var(--q)" title="Q: all query vectors">Q</span><span class="part" title="Divide every score by √d_k for numerical stability">/ √d<sub>k</sub></span>)<span class="part" style="color:var(--v)" title="V: the value vectors, coming up in the Values chapter">V</span></div><label class="toggle" style="margin:14px 0"><input type="checkbox" data-act="scaled" ${sc?"checked":""}> divide scores by √d<sub>k</sub> = √3 ≈ 1.73 before softmax</label>${axes()}${agrid(r.A,{mode:"heat",showSums:true})}<p class="note">Without the √d<sub>k</sub> division the softmax becomes sharper; with large d<sub>k</sub> the raw dot products grow and the gradients would misbehave.</p>`;}},
+]},
+{t:"11:08",title:"Masking",steps:[
+ {h:"Training predicts every next token at once",
+  p:`<p>During training, the weights are nudged to reward or punish the probability the model assigns to the true next word. It turns out to be far more efficient to have the model simultaneously predict the next token after <b>every</b> initial subsequence of the passage. With our phrase, it also predicts what follows <i>creature</i>, and what follows <i>the</i>, and so on. One training example effectively acts as many.</p>`,
+  viz:()=>`<h4>Every prefix is a training example</h4><div class="col" style="gap:6px">${TOK.map((t,i)=>`<div class="sent" style="font-size:15px">${TOK.slice(0,i+1).join(" ")} <span class="pred">→ ${i<N-1?TOK[i+1]:"?"}</span></div>`).join("")}</div>`},
+ {h:"Later words must not influence earlier words",
+  p:`<p>For the attention pattern this means we never want a later token to influence an earlier one; otherwise it could give away the answer for what comes next. The entries representing later tokens influencing earlier ones must be forced to zero.</p><p>The simplest idea, setting them to zero after softmax, breaks normalisation: the columns no longer add up to one.</p>`,
+  viz:()=>{const r=runHead(HEADS[0],{mask:false,scaled:true,naiveZero:true});
+    return `<h4>Naively zeroing the “future” cells after softmax</h4>${axes()}${agrid(r.A,{mode:"heat",showSums:true,maskedSet:(k,q)=>k>q})}<p class="note">Hatched cells: key later than query. The column sums (red) are now below 1, so they are no longer a probability distribution.</p>`;}},
+ {h:"Set them to −∞ before softmax",
+  p:`<p>Instead, before applying softmax, set all of those entries to <b>negative infinity</b>. After softmax they become exactly zero, and every column still sums to one. This is <b>masking</b>. Some versions of attention skip it, but in our GPT example it is always applied, even when running as a chatbot, to stop later tokens from influencing earlier ones.</p>`,
+  viz:(s)=>{const m=s.mask??true; const st=s.stage??"after"; const r=runHead(HEADS[0],{mask:m,scaled:true});
+    return `<h4>${st==="before"?"Scores with −∞ inserted (before softmax)":"Masked attention pattern (after softmax)"}</h4><div class="chips"><button class="chip" aria-pressed="${m}" data-act="mask">Masking on</button><button class="chip" aria-pressed="${st==='before'}" data-act="stage" data-val="before">Show before softmax</button><button class="chip" aria-pressed="${st==='after'}" data-act="stage" data-val="after">Show after softmax</button></div>${axes()}${st==="before"?agrid(r.Sm,{mode:"raw",maskedSet:(k,q)=>m&&k>q}):agrid(r.A,{mode:"heat",showSums:true,maskedSet:(k,q)=>m&&k>q})}<p class="note">With the mask on, the <i>a</i> column can only attend to itself, and <i>forest</i>, the last token, sees everything. This masked pattern is the one the rest of the simulation uses.</p>`;}},
+]},
+{t:"12:42",title:"Context size",steps:[
+ {h:"The pattern grows with the square of the context",
+  p:`<p>The attention pattern has one cell per key‑query pair, so its size is the <b>square of the context size</b>. This is why context size is such a bottleneck for large language models and why scaling it up is non‑trivial. Recent years have seen many variations of attention aimed at making context more scalable, but the video stays with the basics.</p>`,
+  viz:(s)=>{const n=s.ctx??8; const cells=n*n; const w=320, cs=Math.max(1,Math.floor(w/n));
+    return `<h4>Context of ${fInt(n)} tokens → ${fInt(cells)} cells per head</h4><input class="range" type="range" min="3" max="12" step="1" value="${Math.round(Math.log2(n))}" data-act="ctx" aria-label="context size (powers of two)"><div class="row" style="margin-top:12px;align-items:center"><svg width="${cs*n}" height="${cs*n}" style="max-width:100%;border:1px solid var(--line2)">${n<=64?Array.from({length:n},(_,k)=>Array.from({length:n},(_,q)=>`<rect x="${q*cs}" y="${k*cs}" width="${cs-1}" height="${cs-1}" fill="${k>q?'var(--line)':'var(--q)'}" opacity="${k>q?.6:.35+.5*(k===q?1:Math.exp(-(q-k)/3))}"/>`).join("")).join(""):`<rect width="${cs*n}" height="${cs*n}" fill="var(--q)" opacity=".3"/><polygon points="0,0 0,${cs*n} ${cs*n},${cs*n}" fill="var(--line)" opacity=".8"/>`}</svg><div class="col"><div class="big">${fInt(cells)}</div><div class="tiny">scores per head per layer. GPT‑3’s 2,048‑token context gives ${fInt(2048*2048)}; doubling the context quadruples it.</div><div class="tiny" style="margin-top:8px">${((n*(n+1))/2).toLocaleString()} of them survive the mask.</div></div></div>`;}},
+]},
+{t:"13:10",title:"Values",steps:[
+ {h:"Now actually update the embeddings",
+  p:`<p>Computing the pattern lets the model deduce which words are relevant to which other words. Now the embeddings need to be <b>updated</b>, letting words pass information to whichever words they are relevant to. For instance, the embedding of <i>fluffy</i> should cause a change to <i>creature</i> that moves it to a part of the space encoding a fluffy creature.</p><p>The video first shows the most straightforward way, then notes a modification used with multi‑headed attention.</p>`,
+  viz:()=>`<h4>What we want to happen</h4><div class="row" style="align-items:center">${vec(E[1],{name:"E<sub>2</sub> fluffy",cls:"emb",max:1})}<div class="arrowm"><span class="a">⇝</span>should change</div>${vec(E[3],{name:"E<sub>4</sub> creature",cls:"emb",max:1})}<div class="arrowm"><span class="a">→</span>into</div>${vec(add(E[3],RA.V[1]),{name:"“fluffy creature”",cls:"emb",max:1.6})}</div>`},
+ {h:"The value matrix",
+  p:`<p>Use a third matrix, the <b>value matrix</b> W<sub>V</sub>, and multiply it by the embedding of the first word, <i>fluffy</i>. The result is a <b>value vector</b>, something you <b>add to</b> the embedding of the second word, <i>creature</i>. So the value vector lives in the same high‑dimensional space as the embeddings.</p><p>Think of W<sub>V</sub> · E as saying: “if this word is relevant to adjusting the meaning of something else, what exactly should be added to that something else?”</p>`,
+  viz:(s)=>{const i=s.sel??1;return `<h4>v<sub>${i+1}</sub> = W<sub>V</sub> · E<sub>${i+1}</sub>  (straightforward version: W<sub>V</sub> is 8 × 8)</h4>${tokens({sel:i,click:true})}<div class="row" style="align-items:center;margin-top:14px">${mat(RA.Wv,{name:"W<sub>V</sub>",cls:"v",max:1})}<span class="op">·</span>${vec(E[i],{name:`E<sub>${i+1}</sub> ${TOK[i]}`,cls:"emb",max:1})}<span class="op">=</span>${vec(RA.V[i],{name:`v<sub>${i+1}</sub>`,cls:"v",max:1})}</div><p class="note">In this toy, W<sub>V</sub> copies the word’s topic features (cute, colour, green) so they can be added to a noun. Everything else is zero.</p>`;}},
+ {h:"Set aside the keys and queries; compute every value",
+  p:`<p>After computing the attention pattern you are done with the keys and queries. Multiply W<sub>V</sub> by <b>every</b> embedding to get a sequence of value vectors. You might think of each value vector as associated with the corresponding <b>key</b>: same token, same row of the grid.</p>`,
+  viz:()=>`<h4>Value vectors for all eight tokens</h4><div class="row">${TOK.map((t,i)=>vec(RA.V[i],{name:`v<sub>${i+1}</sub> ${t}`,cls:"v",max:1})).join("")}</div>`},
+ {h:"Weight each value by its column of the pattern",
+  p:`<p>For each column of the grid, multiply every value vector by the corresponding weight in that column. Under <i>creature</i>, you add large proportions of the value vectors of <i>fluffy</i> and <i>blue</i>, while the others are zeroed out or nearly so.</p><p>Choose a column.</p>`,
+  viz:(s)=>{const q=s.sel??3;
+    return `<h4>Column “${TOK[q]}”: weights × values</h4>${tokens({sel:q,click:true})}<div class="row" style="margin-top:14px;align-items:flex-end">${TOK.map((t,k)=>`<div class="col" style="align-items:center;gap:6px"><div style="font:13px var(--mono);color:${RA.A[k][q]<0.005?'var(--faint)':'var(--text)'}">${RA.A[k][q].toFixed(2)} ×</div>${vec(RA.V[k],{name:`v<sub>${k+1}</sub> ${t}`,cls:"v",max:1,small:true})}<div style="font:12px var(--mono);color:var(--muted)">=</div>${vec(scale(RA.V[k],RA.A[k][q]),{name:"",cls:"v",max:1,small:true})}</div>`).join("")}</div><p class="note">Weights come from the masked attention pattern, so tokens after “${TOK[q]}” contribute exactly zero.</p>`;}},
+ {h:"Sum the column → ΔE, then add it to the embedding",
+  p:`<p>Add together all of the rescaled values in the column. That gives the change you want to make, labelled <b>ΔE</b>. Add it to the original embedding. Hopefully the result is a more refined vector encoding the richer meaning, like <i>a fluffy blue creature</i>.</p>`,
+  viz:(s)=>{const q=s.sel??3;
+    return `<h4>E′<sub>${q+1}</sub> = E<sub>${q+1}</sub> + ΔE<sub>${q+1}</sub></h4>${tokens({sel:q,click:true})}<div class="row" style="align-items:center;margin-top:14px">${dimLabels(DIMS)}${vec(E[q],{name:`E<sub>${q+1}</sub> ${TOK[q]}`,cls:"emb",max:1})}<span class="op">+</span>${vec(RA.dE[q],{name:`ΔE<sub>${q+1}</sub> = Σ<sub>k</sub> A<sub>k,${q+1}</sub> v<sub>k</sub>`,cls:"v",max:1})}<span class="op">=</span>${vec(RA.E2[q],{name:`E′<sub>${q+1}</sub>`,cls:"emb",max:1.6})}</div><p class="note">${q===3?"<i>creature</i> has gained 0.6 of <i>cute</i> and about 0.2 of <i>colour</i>: fluffiness and blueness, imported from its adjectives.":q===7?"<i>forest</i> absorbs mostly <i>green</i>, from <i>verdant</i>.":"For this column the head did something less interpretable; the video notes that for non‑nouns, “who knows?”"}</p>`;}},
+ {h:"Do it for every column: one head’s output",
+  p:`<p>You do not do this to a single embedding. The same weighted sum runs down <b>every</b> column, producing a sequence of changes, and adding each to its embedding gives a full sequence of refined embeddings popping out of the attention block. Zooming out, this whole process is a <b>single head of attention</b>, parameterised by three matrices of tunable weights: key, query and value.</p>`,
+  viz:()=>`<h4>All eight refined embeddings E′ = E + ΔE</h4><div class="row">${dimLabels(DIMS)}${TOK.map((t,i)=>vec(RA.E2[i],{name:`E′<sub>${i+1}</sub> ${t}`,cls:"emb",max:1.6})).join("")}</div><p class="note">Compare with the original E in chapter 1. The bottom position row is untouched; the topic rows have moved.</p>`},
+]},
+{t:"15:44",title:"Counting parameters",steps:[
+ {h:"Key and query matrices in GPT‑3",
+  p:`<p>The video keeps a running tally of parameters using GPT‑3’s numbers. W<sub>K</sub> and W<sub>Q</sub> each have <b>12,288 columns</b>, matching the embedding dimension, and <b>128 rows</b>, matching the key‑query space. That is about 1.5 million parameters each.</p><p>The calculator below is live; the tally in the footer follows it.</p>`,
+  viz:(s)=>calcView(s,1)},
+ {h:"A square value matrix would be huge",
+  p:`<p>By contrast, as described so far the value matrix would be <b>square</b>: 12,288 rows and 12,288 columns, since both its inputs and outputs live in the embedding space. That is about 150 million parameters. You <i>could</i> do that, devoting orders of magnitude more parameters to the value map than to keys and queries. In practice it is much more efficient to give the value map the <b>same</b> number of parameters as the key and query maps.</p>`,
+  viz:(s)=>calcView(s,2)},
+ {h:"Factor the value map: value‑down and value‑up",
+  p:`<p>The value map is <b>factored</b> as a product of two smaller matrices. Conceptually you should still think of one overall linear map from embedding space to itself, for example taking <i>blue</i> to a “blueness” direction you add to nouns. The first matrix has few rows, typically the key‑query size, and maps the big embedding down to a small space; the video calls it the <b>value‑down</b> matrix. The second maps back up to embedding space; the <b>value‑up</b> matrix. In linear‑algebra terms, the overall map is constrained to be <b>low rank</b>.</p><p class="aside">These names are the video’s own, not conventional. The conventional framing appears in the Output matrix chapter.</p>`,
+  viz:()=>`<h4>W<sub>V</sub> = W<sub>V↑</sub> · W<sub>V↓</sub> in the toy (rank 3 instead of 8)</h4><div class="row" style="align-items:center">${mat(HEADS[0].Vu,{name:"W<sub>V↑</sub> value‑up",cls:"v",max:1})}<span class="op">·</span>${mat(HEADS[0].Vd,{name:"W<sub>V↓</sub> value‑down",cls:"v",max:1})}<span class="op">=</span>${mat(RA.Wv,{name:"W<sub>V</sub> (8 × 8, rank 3)",cls:"v",max:1})}</div><div class="row" style="align-items:center;margin-top:18px">${vec(E[2],{name:"E<sub>3</sub> blue",cls:"emb",max:1})}<div class="arrowm"><span class="a">→</span>W<sub>V↓</sub></div>${vec(RA.Vsmall[2],{name:"3‑dim value",cls:"v",max:1})}<div class="arrowm"><span class="a">→</span>W<sub>V↑</sub></div>${vec(RA.V[2],{name:"v<sub>3</sub> “blueness” to add",cls:"v",max:1})}</div><p class="note">Toy count: 8 × 8 = 64 entries replaced by 8 × 3 + 3 × 8 = 48. At GPT‑3 scale the saving is from 151 M down to 3.1 M.</p>`},
+ {h:"Four matrices of the same size ≈ 6.3 M per head",
+  p:`<p>Now all four matrices, W<sub>Q</sub>, W<sub>K</sub>, W<sub>V↓</sub> and W<sub>V↑</sub>, have the same size. Adding them up gives about <b>6.3 million parameters for one attention head</b>.</p>`,
+  viz:(s)=>calcView(s,3)},
+]},
+{t:"18:21",title:"Cross-attention",steps:[
+ {h:"Self‑attention versus cross‑attention",
+  p:`<p>Everything so far is a <b>self‑attention</b> head. A variation in other models is <b>cross‑attention</b>, used when a model processes two distinct types of data: text in one language and an ongoing translation in another, or speech audio and an ongoing transcript. A cross‑attention head looks almost identical; the only difference is that the key and query maps act on <b>different data sets</b>. In translation, keys might come from one language and queries from the other, and the pattern describes which words correspond.</p><p>There is typically <b>no masking</b>, since there is no notion of later tokens affecting earlier ones. This is not relevant to the GPT example, so it is a side note.</p>`,
+  viz:()=>{const en=["the","blue","creature"], fr=["la","créature","bleue"];
+    const S=[[3.1,-1.2,-0.8],[-0.9,-0.6,2.9],[-1.0,3.2,-0.7]]; // rows: fr keys, cols: en queries
+    const A=softmaxCols(S);
+    return `<h4>Toy translation head: French keys, English queries, no mask</h4><div class="row"><div><div class="tiny" style="margin-bottom:6px">queries from English (top), keys from French (side)</div>${agrid(A,{mode:"heat",rowTok:fr,colTok:en,showSums:true})}</div><div class="col" style="max-width:36ch"><p style="margin:0">The grid need not be square in general, and the “future” cells are not masked: <i>bleue</i> comes after <i>créature</i> in French yet may freely inform <i>blue</i>.</p><p style="margin:0" class="tiny">Scores here are illustrative; the same softmax code from the self‑attention head produces the weights.</p></div></div>`;}},
+]},
+{t:"19:19",title:"Multiple heads",steps:[
+ {h:"Many different ways context changes meaning",
+  p:`<p>If you understood everything so far, you have the essence of attention. What remains is the sense in which you do this <b>many, many times</b>. We focused on adjectives updating nouns, but context influences meaning in countless ways. If <i>they crashed the</i> precedes <i>car</i>, it has implications for the shape of that car. Less grammatical: if <i>wizard</i> appears anywhere near <i>Harry</i>, it likely refers to Harry Potter; if <i>Queen</i>, <i>Sussex</i> and <i>William</i> appear instead, <i>Harry</i> should be updated to mean the prince.</p><p>For each type of contextual update, the key and query parameters would differ to capture a different attention pattern, and the value parameters would differ based on what should be added.</p>`,
+  viz:(s)=>{const ctx=s.harry||"none";
+    const target={none:[.5,.5],wizard:[.82,.8],royal:[.2,.78]}[ctx];
+    const pts=[{x:.5,y:.5,label:ctx==="none"?"Harry (generic)":"Harry",color:"var(--emb)",r:ctx==="none"?6:4},{x:.9,y:.9,label:"Hogwarts",color:"var(--muted)",r:3},{x:.75,y:.68,label:"Potter",color:"var(--muted)",r:3},{x:.1,y:.9,label:"Windsor",color:"var(--muted)",r:3},{x:.28,y:.7,label:"prince",color:"var(--muted)",r:3}];
+    const arrows=ctx==="none"?[]:[{from:[.5,.5],to:target,color:"var(--v)"}];
+    if(ctx!=="none") pts.push({x:target[0],y:target[1],label:"Harry + ΔE",color:"var(--v)",r:6});
+    return `<h4>Same word, different context words anywhere in the passage</h4><div class="chips"><button class="chip" aria-pressed="${ctx==='none'}" data-act="harry" data-val="none">no context</button><button class="chip" aria-pressed="${ctx==='wizard'}" data-act="harry" data-val="wizard">… wizard …</button><button class="chip" aria-pressed="${ctx==='royal'}" data-act="harry" data-val="royal">… Queen, Sussex, William …</button></div>${plot2d(pts,{arrows})}`;}},
+ {h:"Multi‑headed attention: many heads in parallel",
+  p:`<p>A full attention block consists of <b>multi‑headed attention</b>: many single heads run in parallel, each with its own distinct key, query and value maps. GPT‑3 uses <b>96 heads</b> in each block, giving 96 distinct attention patterns and 96 sequences of value vectors.</p><p>This toy block has three heads. Head A is the one we built. Heads B and C were given different weights so they look for different relationships.</p>`,
+  viz:()=>`<h4>Three heads, three attention patterns (all masked)</h4><div class="row" style="gap:30px">${HEADS.map((h,i)=>`<div><div style="font:13px var(--mono);margin-bottom:6px">${h.name}</div>${agrid(R[i].A,{mode:"heat"})}</div>`).join("")}</div><p class="note">B: <i>roamed</i> attends to <i>creature</i>, its subject. C: <i>forest</i> attends to <i>roamed</i>; <i>creature</i> cannot, because the verb comes later and is masked, so its column falls back on itself and the determiner.</p>`},
+ {h:"Each head proposes a change; sum them all",
+  p:`<p>For each position in the context, every head produces a <b>proposed change</b> to be added to the embedding at that position. You sum all of those proposed changes, one per head, and add the result to the original embedding. That sum is one slice of what comes out of the multi‑headed attention block: a single refined embedding.</p><p>Choose a position.</p>`,
+  viz:(s)=>{const q=s.sel??4; const total=R.reduce((acc,r)=>add(acc,r.dE[q]),new Array(D).fill(0));
+    return `<h4>E′<sub>${q+1}</sub> = E<sub>${q+1}</sub> + ΔE<sup>A</sup> + ΔE<sup>B</sup> + ΔE<sup>C</sup></h4>${tokens({sel:q,click:true})}<div class="row" style="align-items:center;margin-top:14px">${dimLabels(DIMS)}${vec(E[q],{name:`E<sub>${q+1}</sub> ${TOK[q]}`,cls:"emb",max:1})}${R.map((r,i)=>`<span class="op">+</span>${vec(r.dE[q],{name:`ΔE<sup>${HEADS[i].short}</sup>`,cls:"v",max:1})}`).join("")}<span class="op">=</span>${vec(add(E[q],total),{name:`E′<sub>${q+1}</sub>`,cls:"emb",max:1.6})}</div><p class="note">The overall idea: running many distinct heads gives the model capacity to learn many distinct ways context changes meaning.</p>`;}},
+ {h:"Tally: about 600 M parameters per attention block",
+  p:`<p>With 96 heads, each with its own four matrices, each block of multi‑headed attention has around <b>600 million</b> parameters.</p>`,
+  viz:(s)=>calcView(s,4)},
+]},
+{t:"22:16",title:"The output matrix",steps:[
+ {h:"How papers actually write the value map",
+  p:`<p>One slightly annoying detail for anyone who reads further. The video framed the value map as a value‑down and value‑up pair living inside each head, and you could implement it that way. But in papers and in practice, all of the <b>value‑up matrices from every head are stapled together</b> into one giant matrix called the <b>output matrix</b>, associated with the whole multi‑headed block. When people say “the value matrix” of a head, they usually mean only the first step, the value‑down projection into the smaller space.</p>`,
+  viz:()=>{const WO=HEADS[0].Vu.map((r,i)=>[...r,...HEADS[1].Vu[i],...HEADS[2].Vu[i]]);
+    const q=4; const concat=[...matvec(HEADS[0].Vd,E[3]),...matvec(HEADS[1].Vd,E[3]),...matvec(HEADS[2].Vd,E[3])];
+    return `<h4>W<sub>O</sub> = [ W<sub>V↑</sub><sup>A</sup> | W<sub>V↑</sub><sup>B</sup> | W<sub>V↑</sup><sup>C</sup> ]  →  8 × 9</h4><div class="row" style="align-items:center">${HEADS.map(h=>mat(h.Vu,{name:`W<sub>V↑</sub><sup>${h.short}</sup>`,cls:"v",max:1,small:true})).join('<span class="op">|</span>')}<span class="op">⇒</span>${mat(WO,{name:"W<sub>O</sub> output matrix",cls:"v",max:1,small:true})}</div><div class="row" style="align-items:center;margin-top:18px">${vec(E[3],{name:"E<sub>4</sub> creature",cls:"emb",max:1,small:true})}<div class="arrowm"><span class="a">→</span>three “value matrices” W<sub>V↓</sub></div>${vec(concat,{name:"9‑dim: values from A, B, C stacked",cls:"v",max:1,small:true})}<div class="arrowm"><span class="a">→</span>W<sub>O</sub></div>${vec(matvec(WO,concat),{name:"back in embedding space",cls:"v",max:1,small:true})}</div><p class="note">Same arithmetic as the sum of three per‑head value‑up products, just grouped differently. The video says this regrouping tends to make things more conceptually confusing, which is why it introduced the per‑head framing first.</p>`;}},
+]},
+{t:"23:19",title:"Going deeper",steps:[
+ {h:"Attention blocks alternate with multi‑layer perceptrons, many times",
+  p:`<p>Data flowing through a transformer does not pass through a single attention block. It also goes through <b>multi‑layer perceptrons</b> (the next chapter’s topic), and then repeatedly through many copies of both. After a word imbibes some of its context, there are many more chances for that more nuanced embedding to be influenced by its more nuanced surroundings. The hope is that deeper layers can encode higher‑level, more abstract ideas: sentiment, tone, whether it is a poem, which scientific truths are relevant.</p>`,
+  viz:(s)=>{const L=s.layers??6;
+    return `<h4>${L} of GPT‑3’s 96 layers</h4><input class="range" type="range" min="1" max="12" value="${L}" data-act="layers" aria-label="layers shown"><div class="row" style="margin-top:12px;align-items:center"><div class="stack">${Array.from({length:L},(_,i)=>`<div class="block attn">attention block ${i+1} · 96 heads</div><div class="block mlp">multi‑layer perceptron ${i+1}</div>`).join("")}<div class="block" style="border-style:dashed">… repeated to 96 layers …</div></div><div class="col" style="max-width:40ch"><p style="margin:0">Each attention block lets every embedding absorb meaning from all the others; each MLP processes each embedding on its own. Stack them and the representations get progressively more abstract.</p></div></div>`;}},
+ {h:"Final tally: just under 58 B parameters in attention",
+  p:`<p>GPT‑3 has <b>96 layers</b>, so the key, query and value count is multiplied by another 96, bringing the total to <b>just under 58 billion</b> parameters devoted to attention heads. That is a lot, but only about <b>a third</b> of the 175 billion in the whole network. Even though attention gets all the attention, most parameters live in the blocks in between.</p>`,
+  viz:(s)=>calcView(s,5)},
+]},
+{t:"24:54",title:"Ending",steps:[
+ {h:"Why attention won: it is extremely parallelisable",
+  p:`<p>A big part of attention’s success is not any specific behaviour it enables but that it is <b>extremely parallelisable</b>: a huge number of computations run in a short time on GPUs. One of the big lessons of the last two decades of deep learning is that scale alone gives huge qualitative improvements, so parallelisable architectures have a huge advantage.</p><p>Every column of the pattern below is computed independently; press play to see the whole grid fill in one “tick”.</p>`,
+  viz:(s)=>{const play=!!s.play;
+    return `<h4>All columns at once</h4><div class="chips"><button class="chip" aria-pressed="${play}" data-act="play">${play?"Reset":"Compute every column in parallel"}</button></div>${axes()}${play?agrid(RA.A,{mode:"heat"}):agrid(RA.A.map(r=>r.map(()=>0)),{mode:"heat"})}<p class="note">Each column’s softmax depends only on its own scores; each score is one dot product. Nothing waits on anything else, which is what a GPU wants.</p>`;}},
+ {h:"Where to go next",
+  p:`<p>The video ends by pointing at further material. Anything by Andrej Karpathy or Chris Olah is called “pure gold”; Vivek (vcubingx) made videos on the motivation and history; Brit Cruise of The Art of the Problem covers the history of language models. The next chapter covers the multi‑layer perceptrons and the training process.</p>`,
+  viz:()=>`<h4>Links from the video description</h4><ul class="links"><li><a href="https://youtu.be/kCc8FmEb1nY" target="_blank" rel="noopener">Build a GPT from scratch, Andrej Karpathy</a></li><li><a href="https://transformer-circuits.pub/2021/framework/index.html" target="_blank" rel="noopener">A Mathematical Framework for Transformer Circuits (Anthropic)</a>, the source of the low‑rank value/output view</li><li><a href="https://youtu.be/1il-s4mgNdI" target="_blank" rel="noopener">vcubingx on language models from the ground up</a></li><li><a href="https://youtu.be/OFS90-FX6pg" target="_blank" rel="noopener">History of language models, Art of the Problem</a></li><li><a href="https://arxiv.org/pdf/1301.3781.pdf" target="_blank" rel="noopener">Early paper on meaningful directions in embedding space</a></li><li><a href="https://www.gptandchill.ai/codingproblems" target="_blank" rel="noopener">ML coding exercises</a></li></ul><p class="note">You have now stepped through every part of the video. Use the chapter list to revisit any step; the toy numbers are recomputed live each time.</p>`},
+]},
+];
+
+function calcView(s,stage){
+  const g={d:s.d??GPT.d,dk:s.dk??GPT.dk,heads:s.heads??GPT.heads,layers:s.layers96??GPT.layers,total:GPT.total};
+  const c=gptCount(g);
+  const inputs=`<div class="calc"><label>embedding dim<input data-num="d" type="number" value="${g.d}" min="1"></label><label>key‑query dim<input data-num="dk" type="number" value="${g.dk}" min="1"></label>${stage>=4?`<label>heads per block<input data-num="heads" type="number" value="${g.heads}" min="1"></label>`:""}${stage>=5?`<label>layers<input data-num="layers96" type="number" value="${g.layers}" min="1"></label>`:""}</div>`;
+  let rows=`<tr><th>matrix</th><th>shape</th><th>parameters</th></tr>
+  <tr><td>W<sub>Q</sub> query</td><td>${fInt(g.dk)} × ${fInt(g.d)}</td><td>${fInt(c.per)}</td></tr>
+  <tr><td>W<sub>K</sub> key</td><td>${fInt(g.dk)} × ${fInt(g.d)}</td><td>${fInt(c.per)}</td></tr>`;
+  if(stage===2) rows+=`<tr><td>W<sub>V</sub> value (square)</td><td>${fInt(g.d)} × ${fInt(g.d)}</td><td>${fInt(c.vfull)}</td></tr><tr class="total"><td>one head, square value</td><td></td><td>${fInt(2*c.per+c.vfull)}</td></tr>`;
+  if(stage>=3) rows+=`<tr><td>W<sub>V↓</sub> value‑down <span class="strike">(${fInt(c.vfull)} if square)</span></td><td>${fInt(g.dk)} × ${fInt(g.d)}</td><td>${fInt(c.per)}</td></tr><tr><td>W<sub>V↑</sub> value‑up</td><td>${fInt(g.d)} × ${fInt(g.dk)}</td><td>${fInt(c.per)}</td></tr><tr class="total"><td>one head</td><td></td><td>${fInt(c.head)}</td></tr>`;
+  if(stage>=4) rows+=`<tr class="total"><td>one block · ${fInt(g.heads)} heads</td><td></td><td>${fInt(c.block)}</td></tr>`;
+  if(stage>=5) rows+=`<tr class="total"><td>all attention · ${fInt(g.layers)} layers</td><td></td><td>${fInt(c.all)} (${fShort(c.all)})</td></tr>`;
+  let extra="";
+  if(stage===2) extra=`<p class="note">The square value matrix would be ${(c.vfull/c.per).toFixed(0)}× larger than the key or query matrix.</p>`;
+  if(stage>=5){const frac=c.all/g.total; extra=`<div style="margin-top:16px;max-width:720px"><div class="bar stacked"><i style="left:0;width:${(frac*100).toFixed(1)}%;background:var(--q)"></i><i style="left:${(frac*100).toFixed(1)}%;width:${((1-frac)*100).toFixed(1)}%;background:var(--emb);opacity:.55"></i></div><div class="legend"><span><i style="background:var(--q)"></i>attention ${fShort(c.all)} · ${(frac*100).toFixed(0)}%</span><span><i style="background:var(--emb);opacity:.55"></i>everything else (mostly the MLP blocks) ${fShort(g.total-c.all)}</span></div></div>`;}
+  return `<h4>Parameter scorekeeping</h4>${inputs}<table class="ptable">${rows}</table>${extra}`;
+}
+
+/* ---------------------------- app state ---------------------------- */
+let cur={c:0,s:0}; const local={}; // per-step interaction state
+try{const saved=JSON.parse(localStorage.getItem("attn-walk")||"null"); if(saved&&CH[saved.c]&&CH[saved.c].steps[saved.s]) cur=saved;}catch(e){}
+const key=()=>`${cur.c}.${cur.s}`;
+const st=()=>local[key()]||(local[key()]={});
+const stage=document.getElementById("stage"), railEl=document.getElementById("chapters"), tallyEl=document.getElementById("tally");
+
+function renderRail(){
+  railEl.innerHTML=CH.map((ch,i)=>{const done=i<cur.c; const prog=i===cur.c?((cur.s+1)/ch.steps.length*100):(done?100:0);
+    return `<li class="${done?'done':''}"><button data-ch="${i}" aria-current="${i===cur.c}"><span class="ts">${ch.t}</span><span><span class="ct">${ch.title}</span><span class="prog"><i style="width:${prog}%"></i></span></span></button></li>`;}).join("");
+}
+function renderTally(){
+  const s=st(); const g={d:s.d??GPT.d,dk:s.dk??GPT.dk,heads:s.heads??GPT.heads,layers:s.layers96??GPT.layers}; const c=gptCount(g);
+  const c7=cur.c>=7, c8=cur.c>8||(cur.c===8&&cur.s>=3), c10=cur.c>10||(cur.c===10&&cur.s>=1);
+  const seenHead=cur.c>6||(cur.c===6&&cur.s>=3), seenQK=cur.c>6||(cur.c===6&&cur.s>=0);
+  tallyEl.innerHTML=`<span class="lbl">GPT‑3 tally</span><span class="${seenQK?'':'dim'}">W<sub>Q</sub>, W<sub>K</sub> <b>${fShort(c.per)}</b> each</span><span class="${seenHead?'':'dim'}">per head <b>${fShort(c.head)}</b></span><span class="${c8?'':'dim'}">per block <b>${fShort(c.block)}</b></span><span class="${c10?'':'dim'}">all layers <b>${fShort(c.all)}</b></span>`;
+  void c7;
+}
+function render(){
+  const ch=CH[cur.c], step=ch.steps[cur.s], s=st();
+  stage.innerHTML=`<div class="ch-head"><span class="ts">${ch.t}</span><h2>${ch.title}</h2></div>
+  <div class="stepbar">${ch.steps.map((x,i)=>`<button data-step="${i}" aria-current="${i===cur.s}">${i+1}. ${x.h.length>34?x.h.slice(0,32)+"…":x.h}</button>`).join("")}</div>
+  <div class="explain"><div class="stepno">Chapter ${cur.c+1} · step ${cur.s+1} of ${ch.steps.length}</div><h3>${step.h}</h3>${step.p}</div>
+  <div class="viz" id="viz">${step.viz(s)}</div>`;
+  document.getElementById("prev").disabled=cur.c===0&&cur.s===0;
+  const last=cur.c===CH.length-1&&cur.s===ch.steps.length-1;
+  document.getElementById("next").textContent=last?"Finished":"Next step →"; document.getElementById("next").disabled=last;
+  renderRail(); renderTally();
+  try{localStorage.setItem("attn-walk",JSON.stringify(cur));}catch(e){}
+}
+function go(c,s){cur={c,s}; render(); window.scrollTo({top:0,behavior:"smooth"});}
+function next(){const ch=CH[cur.c]; if(cur.s<ch.steps.length-1) go(cur.c,cur.s+1); else if(cur.c<CH.length-1) go(cur.c+1,0);}
+function prev(){if(cur.s>0) go(cur.c,cur.s-1); else if(cur.c>0) go(cur.c-1,CH[cur.c-1].steps.length-1);}
+document.getElementById("next").onclick=next; document.getElementById("prev").onclick=prev;
+document.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return; if(e.key==="ArrowRight")next(); if(e.key==="ArrowLeft")prev();});
+railEl.addEventListener("click",e=>{const b=e.target.closest("button[data-ch]"); if(b) go(+b.dataset.ch,0);});
+stage.addEventListener("click",e=>{
+  const sb=e.target.closest("button[data-step]"); if(sb){go(cur.c,+sb.dataset.step);return;}
+  const tk=e.target.closest(".tok.click"); if(tk){st().sel=+tk.dataset.i; rerender();return;}
+  const chip=e.target.closest("[data-act]"); if(chip&&chip.tagName==="BUTTON"){const s=st(),a=chip.dataset.act,v=chip.dataset.val;
+    if(a==="mole"||a==="stage"||a==="harry") s[a]=v; else s[a]=!(s[a]??(a==="soft"||a==="mask"));
+    rerender();}
+});
+stage.addEventListener("change",e=>{const el=e.target; const s=st();
+  if(el.dataset.act==="scaled") s.scaled=el.checked;
+  if(el.dataset.num){const v=Math.max(1,parseInt(el.value)||1); s[el.dataset.num]=v;}
+  rerender();});
+stage.addEventListener("input",e=>{const el=e.target; const s=st();
+  if(el.dataset.act==="ctx"){s.ctx=2**(+el.value); rerender();}
+  if(el.dataset.act==="layers"){s.layers=+el.value; rerender();}});
+stage.addEventListener("mouseover",e=>{const c=e.target.closest("[data-hover] .ac"); if(c){st().hl=[+c.dataset.k,+c.dataset.q]; rerender();}});
+function rerender(){const viz=document.getElementById("viz"); viz.innerHTML=CH[cur.c].steps[cur.s].viz(st()); renderTally();}
+render();
+</script>
+</body>
+</html>
